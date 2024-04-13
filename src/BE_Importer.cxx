@@ -151,10 +151,11 @@ Magick::Image BE_Import::generateImage( const Magick::Image Image, const quantiz
 	if( QuantizeInfo.isNormal ) newImage.normalize();
 
 	newImage.quantizeColors( QuantizeInfo.paletteSize );
-	newImage.quantize();
-
 	newImage.map( m_colorMap,QuantizeInfo.isDithered );
 
+	newImage.quantize();
+
+	m_palette_ptr->clear();
 	return newImage;
 }
 
@@ -183,6 +184,7 @@ void BE_Import::exportImage(){
 	chooser.show();
 
 	if( m_magickImage.columns()>0 && m_magickImage.rows()>0 ){
+
 		Magick::Image imgSave( p_flImage->w(),p_flImage->h(),"RGBA",Magick::CharPixel,*&p_flImage->data()[0] );
 		imgSave.write( chooser.filename() );
 	}
@@ -250,6 +252,7 @@ void BE_Import::updatePreview( const Magick::Image& Image ){
 	Magick::Image tmpMagick( generateImage( Image,qInf ) );
 
 	if( p_flImage ) p_flImage->release();
+
 	p_flImage=magickToFl( tmpMagick );
 
 	Fl_Image *copy=fitToAspect( p_flImage,m_preview_ptr,10 );
