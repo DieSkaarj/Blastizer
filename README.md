@@ -7,4 +7,4 @@ Blastizer uses ImageMagick to convert contemporary image formats to the 4-bit Me
 
 ImageMagick7 development package (ImageMagick-devel), FLTK 1.4
 
-On Linux, depending on your distro the package names may vary. However, at the time of writing, FLTK 1.4 is experimental and not official released, and so it is advised to get the source at: https://github.com/fltk/fltk and compile it yourself.
+On Linux, depending on your distro the package names may vary. However, at the time of writing, FLTK 1.4 is experimental and not officially released, and so it is advised to get the source at: https://github.com/fltk/fltk and compile it yourself.
