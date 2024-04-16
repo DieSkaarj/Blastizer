@@ -1,5 +1,5 @@
 # Blastizer
-##Mega Drive / Genesis Image Converter
+## Mega Drive / Genesis Image Converter
 
 Blastizer uses ImageMagick to convert contemporary image formats to the 4-bit Mega Drive/Genesis colourspace. It offers three filters to adjust the image: Floyd–Steinberg dithering, normalization and equalization. In addition to direct palette manipulation that will swap any color in the image for a choice of any of the 512 Mega Drive/Genesis colours.
 
