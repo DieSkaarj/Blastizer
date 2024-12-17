@@ -25,8 +25,7 @@ class BE_Import{
 	typedef struct{
 		uint16_t	isEqual:1,
 					isNormal:1,
-					isDithered:1,
-					:1,
+					isDithered:2,
 					paletteSize:12;
 	} quantize_t;
 
@@ -35,36 +34,45 @@ class BE_Import{
 	static void	exportCB( Fl_Widget *TWidget,void *TVPtr );
 	static void	updatePreviewCB( Fl_Widget *TWidget,void *TVPtr );
 
-	Fl_Double_Window	*m_window_ptr;
-	Fl_Input				*m_name_ptr,*m_source_ptr;
-	Fl_Button			*m_browse_ptr,*m_transparency_ptr,
-							*m_export_ptr;
-	Fl_Check_Button	*m_dither_ptr,*m_normal_ptr,
-							*m_equal_ptr;
-	Fl_Box				*m_preview_ptr;
-	Fl_Group				*m_colors_ptr;
+	Fl_Double_Window				*m_window_ptr;
+	Fl_Input						*m_name_ptr,*m_source_ptr;
+	Fl_Button						*m_browse_ptr,*m_transparency_ptr,
+									*m_export_ptr;
+	Fl_Check_Button					*m_dither_ptr,*m_normal_ptr,
+									*m_equal_ptr;
+	Fl_Choice						*m_dither_choice_ptr;
+	Fl_Box							*m_preview_ptr;
+	Fl_Group						*m_colors_ptr;
 
 	std::shared_ptr< BE_Palette >	m_palette_ptr;
-	palette_t			colorMap;
-	BE_Color				m_color;	
+	std::vector< short >			m_palette_idx;
+	palette_t						colorMap;
+	BE_Color						m_color;	
+	int								m_transparency_color;
 
-	Magick::Image		m_magickImage,m_colorMap;
-	Fl_Image				*p_flImage;
+	Magick::Image					m_magickImage,m_colorMap;
+	Fl_Image						*p_flImage;
 
-	Fl_RGB_Image*		fitToAspect( const Fl_Image*,const Fl_Box*,const int border );
-	Fl_RGB_Image*		generateMap( size_t W,size_t H,const color_value_t );
-	Fl_RGB_Image*		magickToFl( Magick::Image &Image );
-	Magick::Image		generateImage( const Magick::Image,const quantize_t );
-	void					drawPaletteFromFl( const Fl_Image* );
-	void					exportImage();
-	void					swapColor( BE_Color In,BE_Color Out );
-	void					updatePaletteGrp(  );
-	void					updatePreview( const Magick::Image& Image );
+	Fl_RGB_Image*					fitToAspect( const Fl_Image*,const Fl_Box*,const int border );
+	Fl_RGB_Image*					generateMap( size_t W,size_t H,const color_value_t );
+	Fl_RGB_Image*					magickToFl( Magick::Image &Image );
+	Fl_RGB_Image*					indexToFl( std::vector< short > &,int W,int H );
+	Magick::Image					generateImage( const Magick::Image,const quantize_t );
+	std::vector< short >			indexImage( const Fl_Image* );
+	
+	void							drawPaletteFromFl( const Fl_Image* );
+	void							exportImage();
+//	void							swapColor( BE_Color In,BE_Color Out );
+	void							swapColor( int Swatch,BE_Color Out );
+	void							updatePaletteGrp(  );
+	void							updatePreview( const Magick::Image& Image );
+	void							setTransparencyIndex( int IDx );
 	
 	public:
 
-	BE_Import(){
-		int	winWd{ 600 },winHt{ 360 },
+	BE_Import():
+	m_transparency_color( 0 ){
+		int		winWd{ 600 },winHt{ 360 },
 				x{ 125 },y{ 45 },w{ 150 },h{ 20 },
 				lblX{ 25 },lblW{ 100 },
 				border{ 10 },borderOffset{ border<<1 },
@@ -98,14 +106,23 @@ class BE_Import{
 //		label( lblX,y,lblW,h,"Group name:" );
 //		m_source_ptr=new Fl_Input( x,y,w,h );
 
-		y+=( h<<1 )+( borderOffset ); x+=( w-h ); w=h;
+		y+=( h<<1 )+( borderOffset );
 
 		Fl_Widget* borderWgt;
 
 		borderWgt=create_border( border,y-20,borderW,h+( h<<2 ) );
 		label( lblX,y,lblW,h,"Dithering:" );
+		m_dither_choice_ptr=new Fl_Choice( x,y,w,h );
+		
+		m_dither_choice_ptr->add( "None" );
+		m_dither_choice_ptr->add( "Floyd\\/Steinberg" );
+		m_dither_choice_ptr->value( 0 );
+		m_dither_choice_ptr->callback( updatePreviewCB,this );
+/*
 		m_dither_ptr=new Fl_Check_Button( x,y,w,h );
 		m_dither_ptr->callback( updatePreviewCB,this );
+*/
+		x+=( w-h ); w=h;
 
 		y+=h;
 		label( lblX,y,lblW,h,"Normalize:" );
@@ -118,21 +135,25 @@ class BE_Import{
 		m_equal_ptr->callback( updatePreviewCB,this );
 
 		borderWgt=create_border( border,borderWgt->y()+borderWgt->h()+5,borderW,( h<<2 )-border );
-		m_colors_ptr=new Fl_Group( 22,borderWgt->y()+20,256,borderWgt->h()-40 );
+		m_colors_ptr=new Fl_Group( borderWgt->x()+10,borderWgt->y()+10,borderWgt->w()-20,borderWgt->h()-20 );
 		m_colors_ptr->box( FL_EMBOSSED_BOX );
-		m_colors_ptr->color( FL_LIGHT2 );
+		m_colors_ptr->color( FL_LIGHT1 );
 
-		y=m_colors_ptr->y()+8; x=m_colors_ptr->x()+8;
+		y=m_colors_ptr->y()+18; x=m_colors_ptr->x()+12;
 
 		int counter{ 0 };
 
 		while( counter<16 ){
-			Fl_Button *colorBtn{ new Fl_Button( x+( ( counter++ )*15 ),y,15,15 ) };
+			Fl_Button *colorBtn{ new Fl_Button( x+( ( counter++ )*15 ),y,12,12 ) };
 			colorBtn->callback( colorCB,this );
-			colorBtn->box( FL_ENGRAVED_BOX );
+			colorBtn->box( FL_OVAL_BOX );
+			colorBtn->clear_visible_focus();
+			colorBtn->align( FL_ALIGN_TOP );
 		}
 
 		m_colors_ptr->end();
+		
+//		setTransparencyIndex( 1 );
 
 		w=100; x=110; h=50; y=280;
 		m_export_ptr=new Fl_Button( x,y,w,h,"Export" );
