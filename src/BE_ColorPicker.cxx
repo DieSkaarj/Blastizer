@@ -106,7 +106,7 @@ int BE_ColorPicker::popUp( int X,int Y,const palette_t *Pal,const BE_Color *Colo
 	auto search{ std::find( Pal->begin(),Pal->end(),*Color ) };
 
 	if( search!=Pal->end() ) colorPicker.previous=colorPicker.selected=( std::distance( Pal->begin(),search ) );
-	else std::cerr << *Color << ": not found in palette.\n";
+	else std::cerr << Color->red << "," << Color->green << "," << Color->blue << ": not found in palette.\n";
 
 	char* hexv{ new char[12] };
 

@@ -27,6 +27,7 @@ void BE_Import::browseCB( Fl_Widget *TWidget,void *TVPtr ){
 
 	importWgt.m_magickImage.read( chooser.filename() );	
 	importWgt.m_name_ptr->value( chooser.filename() );
+	
 	importWgt.updatePreview( importWgt.m_magickImage );
 }
 
@@ -41,16 +42,22 @@ void BE_Import::colorCB( Fl_Widget *TWidget,void *TVPtr ){
 	if( static_cast< size_t >( idx ) < importer->m_palette_ptr->size() )
 		color=importer->m_palette_ptr->at( idx );
 
-	const int pIdx{ BE_ColorPicker::popUp( Fl::event_x_root(),Fl::event_y_root(),&mapPalette,&color ) };
+	if( Fl::event_button()==FL_LEFT_MOUSE ){
+		
+		const int pIdx{ BE_ColorPicker::popUp( Fl::event_x_root(),Fl::event_y_root(),&mapPalette,&color ) };
 
-	BE_Color &c{ mapPalette.at( pIdx ) };
+		BE_Color &c{ mapPalette.at( pIdx ) };
 
-	TWidget->color( fl_rgb_color( c.red,c.green,c.blue ) );
+		TWidget->color( fl_rgb_color( c.red,c.green,c.blue ) );
 
-	const int palBtnIdx{ static_cast< Fl_Group* >( TWidget->parent() )->find( TWidget ) };
+		const int palBtnIdx{ static_cast< Fl_Group* >( TWidget->parent() )->find( TWidget ) };
 
-	importer->swapColor( color,c );
-	importer->m_palette_ptr->at( palBtnIdx )=c;
+		importer->swapColor( idx,c );
+	}
+	else
+	if( Fl::event_button()==FL_RIGHT_MOUSE ){
+			importer->setTransparencyIndex( idx );
+	}
 
 	TWidget->parent()->redraw();
 }
@@ -62,6 +69,8 @@ void BE_Import::exportCB( Fl_Widget *TWidget,void *TVPtr ){
 
 void BE_Import::updatePreviewCB( Fl_Widget *TWidget,void *TVPtr ){
 	BE_Import* self{ static_cast< BE_Import *>( TVPtr ) };
+
+	if( !self->m_magickImage.rows() ) return;
 
 	self->updatePreview( self->m_magickImage );
 }
@@ -112,9 +121,9 @@ Fl_RGB_Image* BE_Import::generateMap( const size_t W,const size_t H,const std::v
 
 		mapPalette.push_back( blastedColor );
 
-		if( ++ir >=len ){ ir=0; ++ig; }
-		if( ig>=len ){ ig=0; ++ib; }
-		if( ib>=len ){ ib=0; }
+		if( ++ib >=len ){ ib=0; ++ig; }
+		if( ig>=len ){ ig=0; ++ir; }
+		if( ir>=len ){ ir=0; }
 
 		++counter;
 	}
@@ -144,19 +153,52 @@ Fl_RGB_Image* BE_Import::magickToFl( Magick::Image &Image ){
 	return new Fl_RGB_Image( reinterpret_cast< const uint8_t * >( newData ),columns,rows,depth );
 }
 
+Fl_RGB_Image* BE_Import::indexToFl( std::vector< short > &ImgData,int W,int H ){
+	BE_Color	*data{ new BE_Color[ ImgData.size() ] },
+				*iter{ data };
+	size_t count{ 0 };
+
+	while( count < ImgData.size() ){
+		*( iter++ )=m_palette_ptr->at( ImgData.at( count++ ) );
+	}
+	
+	return new Fl_RGB_Image( reinterpret_cast< const uint8_t * >( data ),W,H,4 );
+}
+
 Magick::Image BE_Import::generateImage( const Magick::Image Image, const quantize_t QuantizeInfo ){
 	Magick::Image newImage( Image );
 
 	if( QuantizeInfo.isEqual ) newImage.equalize();
 	if( QuantizeInfo.isNormal ) newImage.normalize();
 
-	newImage.quantizeColors( QuantizeInfo.paletteSize );
-	newImage.map( m_colorMap,QuantizeInfo.isDithered );
+	newImage.map( m_colorMap );
 
+	newImage.quantizeColors( QuantizeInfo.paletteSize );
+
+	switch( QuantizeInfo.isDithered ){
+		case 0: newImage.quantizeDither( false ); break;
+		case 1: newImage.quantizeDither( true ); break;
+	}
+	
 	newImage.quantize();
 
 	m_palette_ptr->clear();
 	return newImage;
+}
+
+std::vector< short > BE_Import::indexImage( const Fl_Image* FlImage){
+
+	int len{ FlImage->w()*FlImage->h() },count{ 0 };
+	const BE_Color *iteration{ reinterpret_cast< const BE_Color* >( p_flImage->data()[0] ) };
+	std::vector< short > image_data;
+
+	while( count < len ){
+		const BE_Color &c{ *( iteration++ ) };
+		image_data.push_back( m_palette_ptr->index( c )-1 );
+		++count;
+	}
+
+	return image_data;
 }
 
 void BE_Import::drawPaletteFromFl( const Fl_Image* FlImage ){
@@ -164,11 +206,12 @@ void BE_Import::drawPaletteFromFl( const Fl_Image* FlImage ){
 
 	size_t	i{ static_cast< size_t >( 0 ) },
 				j{ static_cast< size_t >( FlImage->w()*FlImage->h() ) };
-	const BE_Color* data{ reinterpret_cast< const BE_Color* >( *FlImage->data() ) };
+	const BE_Color* data{ reinterpret_cast< const BE_Color* >( FlImage->data()[0] ) };
 
 	if( nullptr==data ) return;
 	
 	m_palette_ptr->clear();
+	setTransparencyIndex( 0 );
 
 	while( i<j ){
 		const BE_Color &color{ data[ i++ ] };
@@ -189,27 +232,31 @@ void BE_Import::exportImage(){
 		imgSave.write( chooser.filename() );
 	}
 }
-
+/*
 void BE_Import::swapColor( BE_Color In,BE_Color Out ){
-	int w{ p_flImage->w() },h{ p_flImage->h() },size{ w*h };
-	const BE_Color* imgData{ reinterpret_cast< const BE_Color* >( p_flImage->data()[0] ) };
+	int w{ p_flImage->w() },h{ p_flImage->h() },merge{ 0 },idx{ 0 };
 
-	BE_Color *newData{ new BE_Color[ size ] },
-				*newIter{ newData };
-
-	for( int i{ 0 };i<size;++i ){
-		const BE_Color color{ imgData[ i ] };
-
-		if( color==In ){
-			memcpy( &newIter[ i ],&Out,sizeof( BE_Color ) );
-		}
-		else
-			memcpy( &newIter[ i ],&color,sizeof( BE_Color ) );
+	// Find out if the color chosen by the user is already in the current palette
+	// and save the value
+	if( ( idx=m_palette_ptr->index( Out ) ) ){
+		merge=fl_choice( "The new color is already indexed inside the current palette\nDo you want to merge the indices?","No","Yes",0 );
 	}
 
-//	p_flImage->release();
-	p_flImage=new Fl_RGB_Image( reinterpret_cast< const uint8_t* >( newData ),w,h,4 );
+	int change{ m_palette_ptr->index( In )-1 };
 
+	// If user wants to merge the color we need to find all instances of the current
+	// color and replace them with the index of the already indexed color
+	if( merge ){
+		for( size_t i{ 0 }; i<m_palette_idx.size(); ++i )
+			if( m_palette_idx.at( i )==change ){
+				m_palette_idx.at( i )=--idx;
+			}
+	}
+	else{
+		m_palette_ptr->at( change )=Out;
+	}
+
+	p_flImage=indexToFl( m_palette_idx,w,h );
 	Fl_Image *copy=fitToAspect( p_flImage,m_preview_ptr,10 );
 
 	if( m_preview_ptr->image() ) m_preview_ptr->image()->release();
@@ -217,20 +264,88 @@ void BE_Import::swapColor( BE_Color In,BE_Color Out ){
 
 	m_preview_ptr->redraw();
 
-//	updatePaletteGrp();
+	updatePaletteGrp();
 }
+*/
+void BE_Import::swapColor( int Swatch,BE_Color Out ){
+
+	int w{ p_flImage->w() },h{ p_flImage->h() },merge{ 0 },match{ m_palette_ptr->index( Out ) };
+
+	// Find out if the color chosen by the user is already in the current palette
+	// and save the value
+
+	if( ( match ) && ( --match ) != Swatch ){
+		merge=fl_choice( "The new color is already indexed inside the current palette\nDo you want to merge the indices?","No","Yes",0 );
+	}
+
+//	freopen("log.txt","w",stdout);
+
+	// If user wants to merge the color we need to find all instances of the current
+	// color and replace them with the index of the already indexed color
+	if( merge ){
+
+		m_palette_ptr->at( Swatch )=m_palette_ptr->at( match );
+
+		if( match>Swatch ){
+			std::swap( match,Swatch );
+		}
+
+		for( auto &index:m_palette_idx ){
+
+			if( index==Swatch ){
+				index=match;
+			}
+			if( index>Swatch ){
+				--index;
+			}
+		}
+		
+//		m_palette_ptr->erase( m_palette_ptr->begin()+Swatch );
+	
+		for( int i{ Swatch }; i<m_palette_ptr->size()-1; ++i ){
+
+			m_palette_ptr->at( i )=m_palette_ptr->at( i+1 );
+		}
+		
+		m_palette_ptr->pop_back();
+/*
+		std::shared_ptr< BE_Palette > new_pal{ BE_Palette::create( palette_t( m_palette_ptr->size()-1 ) ) };
+		
+		for( int i{ 0 }; i<new_pal->size(); ++i ){
+		
+				new_pal->at( i )=m_palette_ptr->at( i );
+		}
+
+		m_palette_ptr=new_pal;
+*/
+	}
+	else{
+		m_palette_ptr->at( Swatch )=Out;
+	}
+
+	p_flImage=indexToFl( m_palette_idx,w,h );
+	
+	Fl_Image *copy=fitToAspect( p_flImage,m_preview_ptr,10 );
+
+	if( m_preview_ptr->image() ) m_preview_ptr->image()->release();
+	m_preview_ptr->image( copy );
+	m_preview_ptr->redraw();
+
+	updatePaletteGrp();
+}
+
 
 void BE_Import::updatePaletteGrp( ){
 	size_t colorsSize{ static_cast< size_t >( m_colors_ptr->children() ) };
 
-	drawPaletteFromFl( p_flImage );
-
 	for( size_t i{ 0 };i<colorsSize;++i ){
-		if( i>=m_palette_ptr->size() ){
-			m_colors_ptr->child( i )->color( FL_LIGHT1 );
+		if( i>static_cast< size_t >( m_palette_ptr->size()-1 ) ){
+			m_colors_ptr->child( i )->color( FL_BLACK );
+			m_colors_ptr->child( i )->box( FL_DIAMOND_UP_BOX );
 		}else{
-			BE_Color *color{ &m_palette_ptr->at( i ) };
-			m_colors_ptr->child( i )->color( fl_rgb_color( color->red,color->green,color->blue ) );
+			BE_Color &color{ m_palette_ptr->at( i ) };
+			m_colors_ptr->child( i )->color( fl_rgb_color( color.red,color.green,color.blue ) );
+			m_colors_ptr->child( i )->box( FL_OVAL_BOX );
 		}
 	}
 
@@ -245,7 +360,7 @@ void BE_Import::updatePreview( const Magick::Image& Image ){
 	quantize_t qInf{
 		static_cast< bool >( m_equal_ptr->value() ),
 		static_cast< bool >( m_normal_ptr->value() ),
-		static_cast< bool >( m_dither_ptr->value() ),
+		static_cast< uint16_t >( m_dither_choice_ptr->value() ),
 		16
 	};
 
@@ -254,6 +369,14 @@ void BE_Import::updatePreview( const Magick::Image& Image ){
 	if( p_flImage ) p_flImage->release();
 
 	p_flImage=magickToFl( tmpMagick );
+	
+	drawPaletteFromFl( p_flImage );
+	m_palette_idx=indexImage( p_flImage );
+
+	drawPaletteFromFl( p_flImage );
+	updatePaletteGrp();
+
+	p_flImage=indexToFl( m_palette_idx,tmpMagick.columns(),tmpMagick.rows() );
 
 	Fl_Image *copy=fitToAspect( p_flImage,m_preview_ptr,10 );
 
@@ -261,7 +384,13 @@ void BE_Import::updatePreview( const Magick::Image& Image ){
 	m_preview_ptr->image( copy );
 
 	m_preview_ptr->redraw();
-
-	updatePaletteGrp();
 }
 
+void BE_Import::setTransparencyIndex( int IDx ){
+
+		if( IDx > ( m_palette_ptr->size()-1 ) ) IDx=m_palette_ptr->size()-1;
+		if( IDx < 0 ) IDx=0;
+		m_colors_ptr->child( m_transparency_color )->label( "" );
+		m_transparency_color=IDx;
+		m_colors_ptr->child( m_transparency_color )->label( "@-92UpArrow" );
+}
